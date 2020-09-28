@@ -17,6 +17,7 @@ import {
 } from '../signalingprotocol/SignalingProtocol.js';
 import VideoDownlinkBandwidthPolicy from '../videodownlinkbandwidthpolicy/VideoDownlinkBandwidthPolicy';
 import VideoStreamIdSet from '../videostreamidset/VideoStreamIdSet';
+import VideoSendingAttendee from '../videostreamindex/VideoSendingAttendee';
 import VideoUplinkBandwidthPolicy from '../videouplinkbandwidthpolicy/VideoUplinkBandwidthPolicy';
 import BaseTask from './BaseTask';
 
@@ -74,6 +75,7 @@ export default class ReceiveVideoStreamIndexTask extends BaseTask
       videoUplinkBandwidthPolicy,
     } = this.context;
 
+    const oldAttendees = videoStreamIndex.allVideoSendingAttendeesExcludingSelf(selfAttendeeId);
     videoStreamIndex.integrateIndexFrame(indexFrame);
     videoDownlinkBandwidthPolicy.updateIndex(videoStreamIndex);
     videoUplinkBandwidthPolicy.updateIndex(videoStreamIndex);
@@ -81,6 +83,30 @@ export default class ReceiveVideoStreamIndexTask extends BaseTask
     this.resubscribe(videoDownlinkBandwidthPolicy, videoUplinkBandwidthPolicy);
     this.updateVideoAvailability(indexFrame);
     this.handleIndexVideosPausedAtSource();
+    const newAttendees = videoStreamIndex.allVideoSendingAttendeesExcludingSelf(selfAttendeeId);
+    if (!this.areVideoSendingAttendeesEqual(oldAttendees, newAttendees)) {
+      this.context.audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        Maybe.of(observer.remoteVideosAvailableDidChange).map(f => f.bind(observer)(newAttendees));
+      });
+    }
+  }
+
+  private areVideoSendingAttendeesEqual(
+    oldAttendees: VideoSendingAttendee[],
+    newAttendees: VideoSendingAttendee[]
+  ): boolean {
+    if (oldAttendees.length !== newAttendees.length) {
+      return false;
+    }
+    const compare = (attendeeA: VideoSendingAttendee, attendeeB: VideoSendingAttendee): number =>
+      attendeeA.attendeeId.localeCompare(attendeeB.attendeeId);
+
+    const sortedOldAttendees = [...oldAttendees].sort(compare);
+    const sortedNewAttendees = [...newAttendees].sort(compare);
+
+    return sortedOldAttendees.every(
+      (val: VideoSendingAttendee, index) => val.attendeeId === sortedNewAttendees[index].attendeeId
+    );
   }
 
   private resubscribe(

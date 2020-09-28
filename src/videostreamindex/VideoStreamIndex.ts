@@ -7,6 +7,7 @@ import {
   SdkSubscribeAckFrame,
 } from '../signalingprotocol/SignalingProtocol.js';
 import VideoStreamIdSet from '../videostreamidset/VideoStreamIdSet';
+import VideoSendingAttendee from './VideoSendingAttendee';
 import VideoStreamDescription from './VideoStreamDescription';
 
 /**
@@ -39,9 +40,9 @@ export default interface VideoStreamIndex {
   allStreams(): VideoStreamIdSet;
 
   /**
-   * Returns the attendee ids of attendees who are publishing videos excluding self
+   * Returns attendees who are sending videos excluding self
    */
-  allVideoSendingAttendeesExcludingSelf(selfAttendeeId: string): Set<string>;
+  allVideoSendingAttendeesExcludingSelf(selfAttendeeId: string): VideoSendingAttendee[];
 
   /**
    * Return a selection set of streams for subscription based on self attendee id, size information of tiles, bandwidth limitation

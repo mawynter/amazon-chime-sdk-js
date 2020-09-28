@@ -15,6 +15,7 @@ import DeviceController from '../devicecontroller/DeviceController';
 import DevicePermission from '../devicecontroller/DevicePermission';
 import VideoQualitySettings from '../devicecontroller/VideoQualitySettings';
 import RealtimeController from '../realtimecontroller/RealtimeController';
+import VideoSendingAttendee from '../videostreamindex/VideoSendingAttendee';
 import VideoTile from '../videotile/VideoTile';
 import VideoTileController from '../videotilecontroller/VideoTileController';
 
@@ -458,5 +459,11 @@ export default class DefaultAudioVideoFacade implements AudioVideoFacade {
       s += ` -> ${JSON.stringify(output)}`;
     }
     this.audioVideoController.logger.info(s);
+  }
+
+  getRemoteVideosAvailable(): VideoSendingAttendee[] {
+    const result = this.audioVideoController.getRemoteVideosAvailable();
+    this.trace('getRemoteVideosAvailable', null, result);
+    return result;
   }
 }

@@ -26,10 +26,14 @@ import {
   SdkJoinAckFrame,
   SdkLeaveAckFrame,
   SdkSignalFrame,
+  SdkStreamDescriptor,
+  SdkStreamMediaType,
   SdkSubscribeAckFrame,
   SdkTurnCredentials,
 } from '../../src/signalingprotocol/SignalingProtocol.js';
+import SimulcastLayers from '../../src/simulcastlayers/SimulcastLayers';
 import AllHighestVideoBandwidthPolicy from '../../src/videodownlinkbandwidthpolicy/AllHighestVideoBandwidthPolicy';
+import VideoSendingAttendee from '../../src/videostreamindex/VideoSendingAttendee';
 import NScaleVideoUplinkBandwidthPolicy from '../../src/videouplinkbandwidthpolicy/NScaleVideoUplinkBandwidthPolicy';
 import DefaultWebSocketAdapter from '../../src/websocketadapter/DefaultWebSocketAdapter';
 import DOMMockBehavior from '../dommock/DOMMockBehavior';
@@ -102,8 +106,11 @@ describe('DefaultAudioVideoController', () => {
     return joinAckSignalBuffer;
   }
 
-  function makeIndexFrame(): Uint8Array {
+  function makeIndexFrame(sources?: SdkStreamDescriptor[]): Uint8Array {
     const indexFrame = SdkIndexFrame.create();
+    if (sources) {
+      indexFrame.sources = sources;
+    }
     const indexSignal = SdkSignalFrame.create();
     indexSignal.type = SdkSignalFrame.Type.INDEX;
     indexSignal.index = indexFrame;
@@ -113,6 +120,17 @@ describe('DefaultAudioVideoController', () => {
     indexSignalBuffer.set(buffer, 1);
     return indexSignalBuffer;
   }
+
+  const makeIndexFrameWithAttendees = (attendees: VideoSendingAttendee[]): Uint8Array => {
+    const sources = attendees.map(({ attendeeId, externalUserId }) => {
+      const streamDescriptor = SdkStreamDescriptor.create();
+      streamDescriptor.attendeeId = attendeeId;
+      streamDescriptor.externalUserId = externalUserId;
+      streamDescriptor.mediaType = SdkStreamMediaType.VIDEO;
+      return streamDescriptor;
+    });
+    return makeIndexFrame(sources);
+  };
 
   // For SubscribeAndReceiveSubscribeAckTask
   function makeSubscribeAckFrame(): Uint8Array {
@@ -1744,6 +1762,167 @@ describe('DefaultAudioVideoController', () => {
       await sendICEEventAndSubscribeAckFrame();
 
       await stop();
+    });
+  });
+
+  describe('getRemoteVideosAvailable', () => {
+    const compare = (a: VideoSendingAttendee, b: VideoSendingAttendee): number =>
+      a.attendeeId.localeCompare(b.attendeeId);
+
+    it('should match index frame sources excluding self', async () => {
+      const expectedAttendees = [{ attendeeId: 'a', externalUserId: 'a' }];
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      await start();
+      await delay(300);
+      webSocketAdapter.send(makeIndexFrameWithAttendees(expectedAttendees));
+      await delay(300);
+      const attendees = audioVideoController.getRemoteVideosAvailable();
+      expect(attendees.sort(compare)).to.eql(expectedAttendees.sort(compare));
+      await stop();
+    });
+
+    it('should return an array of length 0, when videoStreamIndex is not initialized', async () => {
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      const attendees = audioVideoController.getRemoteVideosAvailable();
+      expect(attendees).to.have.lengthOf(0);
+    });
+
+    it('should return [] when called after meeting session is stopped', async () => {
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpMediaStreamBroker(),
+        reconnectController
+      );
+      await start();
+      await stop();
+      await delay(500);
+      expect(audioVideoController.getRemoteVideosAvailable()).to.deep.equal([]);
+    });
+  });
+
+  describe('encodingSimulcastLayerDidChange', () => {
+    it('observer should get called only when added', async () => {
+      configuration.enableUnifiedPlanForChromiumBasedBrowsers = true;
+      configuration.enableSimulcastForUnifiedPlanChromiumBasedBrowsers = true;
+      domMockBehavior.browserName = 'chrome';
+      domMockBuilder = new DOMMockBuilder(domMockBehavior);
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      // @ts-ignore
+      expect(audioVideoController.enableSimulcast).to.equal(true);
+      let event = 0;
+      let observed = 0;
+      class TestObserver implements AudioVideoObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayers: SimulcastLayers): void {
+          if (event !== 1 && event !== 3 && event !== 5) {
+            assert.fail();
+          }
+          observed += 1;
+        }
+      }
+      const observer = new TestObserver();
+      await delay();
+      audioVideoController.addObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.encodingSimulcastLayerDidChange(SimulcastLayers.High);
+      });
+      await delay();
+      audioVideoController.removeObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.encodingSimulcastLayerDidChange(SimulcastLayers.High);
+      });
+      await delay();
+      audioVideoController.addObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.encodingSimulcastLayerDidChange(SimulcastLayers.High);
+      });
+      await delay();
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.encodingSimulcastLayerDidChange(SimulcastLayers.High);
+      });
+      audioVideoController.removeObserver(observer);
+      await delay();
+      audioVideoController.addObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.encodingSimulcastLayerDidChange(SimulcastLayers.High);
+      });
+      await delay();
+      expect(event).to.equal(5);
+      expect(observed).to.equal(3);
+    });
+
+    it('observer should get called', async () => {
+      configuration.enableUnifiedPlanForChromiumBasedBrowsers = true;
+      configuration.enableSimulcastForUnifiedPlanChromiumBasedBrowsers = true;
+      domMockBehavior.browserName = 'chrome';
+      domMockBuilder = new DOMMockBuilder(domMockBehavior);
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      class TestObserver implements AudioVideoObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayers: SimulcastLayers): void {}
+      }
+      const observer = new TestObserver();
+      const spy = sinon.spy(observer, 'encodingSimulcastLayerDidChange');
+      audioVideoController.addObserver(observer);
+      await start();
+      await delay();
+      // @ts-ignore
+      audioVideoController.meetingSessionContext.videoUplinkBandwidthPolicy.chooseEncodingParameters();
+      await delay();
+      await stop();
+      expect(spy.calledOnce).to.be.true;
+    });
+
+    it('observer should not get called with non-simulcast policy', async () => {
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      class TestObserver implements AudioVideoObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayers: SimulcastLayers): void {}
+      }
+      const observer = new TestObserver();
+      const spy = sinon.spy(observer, 'encodingSimulcastLayerDidChange');
+      audioVideoController.addObserver(observer);
+      await start();
+      await delay();
+      // @ts-ignore
+      audioVideoController.meetingSessionContext.videoUplinkBandwidthPolicy.chooseEncodingParameters();
+      await delay();
+      await stop();
+      expect(spy.notCalled).to.be.true;
     });
   });
 });

@@ -11,6 +11,7 @@ import {
 } from '../signalingprotocol/SignalingProtocol.js';
 import DefaultVideoStreamIdSet from '../videostreamidset/DefaultVideoStreamIdSet';
 import VideoStreamIndex from '../videostreamindex/VideoStreamIndex';
+import VideoSendingAttendee from './VideoSendingAttendee';
 import VideoStreamDescription from './VideoStreamDescription';
 
 /**
@@ -116,8 +117,9 @@ export default class DefaultVideoStreamIndex implements VideoStreamIndex {
     return set;
   }
 
-  allVideoSendingAttendeesExcludingSelf(selfAttendeeId: string): Set<string> {
-    const attendees = new Set<string>();
+  allVideoSendingAttendeesExcludingSelf(selfAttendeeId: string): VideoSendingAttendee[] {
+    const attendees = [];
+    const attendeeSet = new Set<string>();
     if (this.currentIndex) {
       if (this.currentIndex.sources.length) {
         for (const stream of this.currentIndex.sources) {
@@ -125,12 +127,15 @@ export default class DefaultVideoStreamIndex implements VideoStreamIndex {
             stream.attendeeId !== selfAttendeeId &&
             stream.mediaType === SdkStreamMediaType.VIDEO
           ) {
-            attendees.add(stream.attendeeId);
+            const { attendeeId, externalUserId } = stream;
+            if (!attendeeSet.has(attendeeId)) {
+              attendees.push({ attendeeId, externalUserId });
+              attendeeSet.add(attendeeId);
+            }
           }
         }
       }
     }
-
     return attendees;
   }
 

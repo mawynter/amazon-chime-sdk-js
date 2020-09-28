@@ -6,7 +6,10 @@ import ClientVideoStreamReceivingReport from '../clientmetricreport/ClientVideoS
 import ConnectionHealthData from '../connectionhealthpolicy/ConnectionHealthData';
 import MeetingSessionStatus from '../meetingsession/MeetingSessionStatus';
 import MeetingSessionVideoAvailability from '../meetingsession/MeetingSessionVideoAvailability';
+import SimulcastLayers from '../simulcastlayers/SimulcastLayers';
+import VideoSendingAttendee from '../videostreamindex/VideoSendingAttendee';
 import VideoTileState from '../videotile/VideoTileState';
+import VideoTileStatusCode from '../videotile/VideoTileStatusCode';
 
 export default interface AudioVideoObserver {
   /**
@@ -33,7 +36,7 @@ export default interface AudioVideoObserver {
   /**
    * Called whenever a tile has been removed.
    */
-  videoTileWasRemoved?(tileId: number): void;
+  videoTileWasRemoved?(tileId: number, status?: VideoTileStatusCode): void;
 
   /**
    * Called when video availability has changed. This information can be used to decide whether to
@@ -70,7 +73,7 @@ export default interface AudioVideoObserver {
   ): void;
 
   /**
-   * Called when one or more remote video streams do not meet expected average bitrate
+   * Called when one or more remote video streams do not meet expected average bitrate.
    */
   videoNotReceivingEnoughData?(receivingDataMap: ClientVideoStreamReceivingReport[]): void;
 
@@ -107,4 +110,14 @@ export default interface AudioVideoObserver {
    * trigger a message to the user about the situation.
    */
   videoSendDidBecomeUnavailable?(): void;
+
+  /**
+   * Called when the remote attendees sending video gets changed.
+   */
+  remoteVideosAvailableDidChange?(attendees: VideoSendingAttendee[]): void;
+
+  /**
+   * Called when simulcast uplink encoding renditions are changed.
+   */
+  encodingSimulcastLayerDidChange?(simulcastLayers: SimulcastLayers): void;
 }
