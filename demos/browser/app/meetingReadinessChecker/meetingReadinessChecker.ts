@@ -31,6 +31,8 @@ import {
   MultiLogger,
   Versioning,
 } from '../../../../src/index';
+import MeetingSessionCredentials from '../../../../src/meetingsession/MeetingSessionCredentials';
+import MeetingSessionURLs from '../../../../src/meetingsession/MeetingSessionURLs';
 
 const { v4: uuidv4 } = require('uuid');
 
@@ -52,6 +54,7 @@ export class DemoMeetingApp {
   region: string | null = null;
   meetingSession: MeetingSession | null = null;
   audioVideo: AudioVideoFacade | null = null;
+  logger: Logger;
   deviceController: DefaultDeviceController;
   meetingReadinessChecker: MeetingReadinessChecker | null = null;
   canStartLocalVideo: boolean = true;
@@ -77,6 +80,8 @@ export class DemoMeetingApp {
     this.initParameters();
     this.setMediaRegion();
     this.switchToFlow('flow-authenticate');
+    const button = document.getElementById("authenticate") as HTMLButtonElement;
+    button.disabled = false;
   }
 
   switchToFlow(flow: string): void {
@@ -91,22 +96,31 @@ export class DemoMeetingApp {
     this.defaultBrowserBehaviour = new DefaultBrowserBehavior();
     this.meeting = `READINESS_CHECKER-${uuidv4()}`;
     this.name = `READINESS_CHECKER${uuidv4()}`;
-    this.region = (document.getElementById('inputRegion') as HTMLInputElement).value;
-    //start meeting
+    // Initialize logger and device controller to populate device list
     new AsyncScheduler().start(
       async (): Promise<void> => {
-        let chimeMeetingId = '';
-
-        try {
-          chimeMeetingId = await this.authenticate();
-          this.log(`chimeMeetingId: ${chimeMeetingId}`);
-          const button = document.getElementById("authenticate") as HTMLButtonElement;
-          button.disabled = false;
-        } catch (error) {
-          return error;
-        }
+        await this.initializeLoggerAndDeviceController();
       }
     );
+  }
+
+  async startMeetingAndInitializeMeetingReadinessChecker(): Promise<void> {
+    //start meeting
+    let chimeMeetingId = '';
+    try {
+      this.region = (document.getElementById('inputRegion') as HTMLInputElement).value;
+      chimeMeetingId = await this.authenticate();
+      this.log(`chimeMeetingId: ${chimeMeetingId}`);
+    } catch (error) {
+      return error;
+    }
+  }
+
+  async authenticate(): Promise<string> {
+    let joinInfo = (await this.joinMeeting()).JoinInfo;
+    const configuration = new MeetingSessionConfiguration(joinInfo.Meeting, joinInfo.Attendee);
+    await this.initializeMeetingSession(configuration);
+    return configuration.meetingId;
   }
 
   getAudioInputDevice = async () => {
@@ -305,6 +319,7 @@ export class DemoMeetingApp {
 
     document.getElementById('form-authenticate').addEventListener('submit', async e => {
       e.preventDefault();
+      await this.startMeetingAndInitializeMeetingReadinessChecker();
       this.switchToFlow('flow-readinesstest');
       //create new HTML header
       (document.getElementById('sdk-version') as HTMLSpanElement).innerText =
@@ -323,25 +338,34 @@ export class DemoMeetingApp {
     });
   }
 
-  async authenticate(): Promise<string> {
-    let joinInfo = (await this.joinMeeting()).JoinInfo;
-    const configuration = new MeetingSessionConfiguration(joinInfo.Meeting, joinInfo.Attendee);
-    await this.initializeMeetingSession(configuration);
-    return configuration.meetingId;
+  createEmptyMeetingSessionConfiguration(): MeetingSessionConfiguration {
+    const emptyConfiguration = new MeetingSessionConfiguration();
+    emptyConfiguration.meetingId = '';
+    emptyConfiguration.credentials = new MeetingSessionCredentials();
+    emptyConfiguration.credentials.attendeeId = '';
+    emptyConfiguration.credentials.joinToken = '';
+    emptyConfiguration.urls = new MeetingSessionURLs();
+    emptyConfiguration.urls.turnControlURL = '';
+    emptyConfiguration.urls.audioHostURL = '';
+    emptyConfiguration.urls.screenViewingURL = '';
+    emptyConfiguration.urls.screenDataURL = '';
+    emptyConfiguration.urls.screenSharingURL = 'wss://localhost/';
+    emptyConfiguration.urls.signalingURL = 'wss://localhost/';
+    return emptyConfiguration;
   }
 
-  async initializeMeetingSession(configuration: MeetingSessionConfiguration): Promise<void> {
+  async initializeLoggerAndDeviceController(configuration?: MeetingSessionConfiguration): Promise<void> {
     let logger: Logger;
     const logLevel = LogLevel.INFO;
     const consoleLogger = (logger = new ConsoleLogger('SDK', logLevel));
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-      logger = consoleLogger;
+      this.logger = consoleLogger;
     } else {
-      logger = new MultiLogger(
+      this.logger = new MultiLogger(
         consoleLogger,
         new MeetingSessionPOSTLogger(
           'SDK',
-          configuration,
+          configuration ? configuration : this.createEmptyMeetingSessionConfiguration(),
           DemoMeetingApp.LOGGER_BATCH_SIZE,
           DemoMeetingApp.LOGGER_INTERVAL_MS,
           `${DemoMeetingApp.BASE_URL}logs`,
@@ -350,18 +374,22 @@ export class DemoMeetingApp {
       );
     }
     this.deviceController = new DefaultDeviceController(logger);
+    await this.populateAllDeviceLists();
+  }
+
+  async initializeMeetingSession(configuration: MeetingSessionConfiguration): Promise<void> {
+    await this.initializeLoggerAndDeviceController(configuration);
     configuration.enableWebAudio = this.enableWebAudio;
     configuration.enableUnifiedPlanForChromiumBasedBrowsers = this.enableUnifiedPlanForChromiumBasedBrowsers;
     configuration.attendeePresenceTimeoutMs = 15000;
     configuration.enableSimulcastForUnifiedPlanChromiumBasedBrowsers = this.enableSimulcast;
-    this.meetingSession = new DefaultMeetingSession(configuration, logger, this.deviceController);
+    this.meetingSession = new DefaultMeetingSession(configuration, this.logger, this.deviceController);
     this.audioVideo = this.meetingSession.audioVideo;
-    this.meetingReadinessChecker = new DefaultMeetingReadinessChecker(logger, this.meetingSession);
+    this.meetingReadinessChecker = new DefaultMeetingReadinessChecker(this.logger, this.meetingSession);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (global as any).meetingReadinessChecker = this.meetingReadinessChecker;
 
     this.setupDeviceLabelTrigger();
-    await this.populateAllDeviceLists();
   }
 
   setupDeviceLabelTrigger(): void {
@@ -399,7 +427,7 @@ export class DemoMeetingApp {
     this.populateDeviceList(
       'audio-input',
       genericName,
-      await this.audioVideo.listAudioInputDevices(),
+      await this.deviceController.listAudioInputDevices(),
       additionalDevices
     );
   }
@@ -410,10 +438,10 @@ export class DemoMeetingApp {
     this.populateDeviceList(
       'video-input',
       genericName,
-      await this.audioVideo.listVideoInputDevices(),
+      await this.deviceController.listVideoInputDevices(),
       additionalDevices
     );
-    const cameras = await this.audioVideo.listVideoInputDevices();
+    const cameras = await this.deviceController.listVideoInputDevices();
     this.cameraDeviceIds = cameras.map(deviceInfo => {
       return deviceInfo.deviceId;
     });
@@ -425,7 +453,7 @@ export class DemoMeetingApp {
     this.populateDeviceList(
       'audio-output',
       genericName,
-      await this.audioVideo.listAudioOutputDevices(),
+      await this.deviceController.listAudioOutputDevices(),
       additionalDevices
     );
   }
